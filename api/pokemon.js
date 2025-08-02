@@ -1,37 +1,53 @@
 const fs = require("fs");
 const path = require("path");
 
-let data;
+let spawnData;
 
-// Load the JSON once (cold start caching)
 function loadData() {
-  if (!data) {
+  if (!spawnData) {
     const filePath = path.join(process.cwd(), "spawn_biomes_detailed.json");
-    data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    spawnData = JSON.parse(fs.readFileSync(filePath, "utf8"));
   }
-  return data;
+  return spawnData;
+}
+
+function findPokemon(data, name) {
+  // Normalize name (case-insensitive, handle Mr. Mime etc.)
+  const keys = Object.keys(data);
+  const target = name.toLowerCase().replace(" ", "").replace("-", "");
+
+  return keys.find(
+    (key) => key.toLowerCase().replace(/[\s\-♀♂.]/g, "") === target
+  );
 }
 
 module.exports = (req, res) => {
-  const { name, biome } = req.query;
-  const spawnData = loadData();
+  const { name } = req.query;
+  const data = loadData();
 
-  if (name) {
-    const match = spawnData[name];
-    if (match) return res.status(200).json(match);
-    return res.status(404).json({ error: "Pokémon not found" });
+  if (!name) {
+    return res
+      .status(400)
+      .send("Missing Pokémon name. Use ?name=Bulbasaur, etc.");
   }
 
-  if (biome) {
-    const results = {};
-    for (const [pokemon, entries] of Object.entries(spawnData)) {
-      const matched = entries.filter((entry) =>
-        entry.biomes?.some((b) => b.toLowerCase().includes(biome.toLowerCase()))
-      );
-      if (matched.length) results[pokemon] = matched;
-    }
-    return res.status(200).json(results);
+  const matchedKey = findPokemon(data, name);
+
+  if (!matchedKey) {
+    return res
+      .status(404)
+      .send(`No spawn info found for '${name}'. Double check spelling.`);
   }
 
-  res.status(200).json({ message: "Specify ?name= or ?biome=" });
+  const entries = data[matchedKey];
+
+  const main = entries[0]; // Show the first spawn entry (most common case)
+  const biomeList = main.biomes?.join(", ") || "unknown biomes";
+  const rarity = main.rarity ?? "unknown";
+  const times = main.times?.join(", ") || "any time";
+  const locations = main.stringLocationTypes?.join(", ") || "any location";
+
+  const message = `${matchedKey} spawns in: ${biomeList} (rarity: ${rarity}, time: ${times}, location: ${locations})`;
+
+  return res.status(200).send(message);
 };
